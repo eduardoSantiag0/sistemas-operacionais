@@ -6,6 +6,8 @@
 
 #define NUM_BABOONS 10
 #define SLEEP_TIME 3
+#define MAX_ON_ROPE 5
+
 
 sem_t crossingLock, turnstile, multiplex;
 
@@ -90,7 +92,7 @@ int main()
 
     sem_init(&crossingLock, 0, 1);
     sem_init(&turnstile, 0, 1);
-    sem_init(&multiplex, 0, 5);
+    sem_init(&multiplex, 0, MAX_ON_ROPE);
 
     for (int i = 0; i < NUM_BABOONS; i++)
     {
