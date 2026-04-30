@@ -1,129 +1,212 @@
+//A direção atual tem direito a continuar por um pouco, 
+// mesmo que o outro lado já esteja esperando.
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <errno.h>
 
-#define NUM_BABOONS 10
-#define SLEEP_TIME 3
+
+#define MAX_BATCH 7
+#define MIN_BATCH 5
+#define SLEEP_TIME 4
+
 #define MAX_ON_ROPE 5
 
-#define MAX_DELAY_US 500000 
+#define LEFT 0
+#define RIGHT 1
 
-#define NUM_LEFT_BABOONS 5
-#define NUM_RIGHT_BABOONS 5
+#define NUM_LEFT_BABOONS 10
+#define NUM_RIGHT_BABOONS 10
+#define MAX_DELAY_US 500000
+#define TIMEOUT_US 1000000
 
-// crossingLock -> exclusão entre direções
-// catraca -> impede entrada de novos babuínos quando lado oposto chega
-// multiplex -> limite máximo na corda
-sem_t crossingLock, catraca, multiplex;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t printMutex = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_mutex_t lmutex = PTHREAD_MUTEX_INITIALIZER;
-int leftCount = 0;
+pthread_cond_t canLeft = PTHREAD_COND_INITIALIZER;
+pthread_cond_t canRight = PTHREAD_COND_INITIALIZER;
 
-pthread_mutex_t rmutex = PTHREAD_MUTEX_INITIALIZER;
-int rightCount = 0;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+int leftWaiting = 0;
+int leftCrossing = 0;
+
+int rightWaiting = 0;
+int rightCrossing = 0;
+
+int direction = LEFT;
+int batchCount = 0;
 
 char *drawRight;
 char *drawLeft;
 
+
+void unlock_mutex(void *arg)
+{
+    pthread_mutex_unlock((pthread_mutex_t *)arg);
+}
+
 void *leftBaboon(void *arg)
 {
-        sem_wait(&catraca);
-        sem_post(&catraca);
+    int id = *(int *)arg;
 
-        pthread_mutex_lock(&lmutex);
-        leftCount++;
+    pthread_mutex_lock(&mutex);
 
-        if (leftCount == 1)
-            sem_wait(&crossingLock);
+    // Para liberar o mutex caso a thread seja cancelada enquanto espera
+    pthread_cleanup_push(unlock_mutex, &mutex);
 
-        pthread_mutex_unlock(&lmutex);
+    leftWaiting++;
 
-        sem_wait(&multiplex);
+    while (
+        direction != LEFT ||
+        rightCrossing > 0 ||
+        leftCrossing == MAX_ON_ROPE ||
+        (rightWaiting > 0 && batchCount >= MAX_BATCH)
+    )
+    {
+        pthread_cond_wait(&canLeft, &mutex);
+    }
 
-        pthread_mutex_lock(&printMutex);
-        printf("LEFT -> RIGHT\n");
-        printf("%s", drawLeft);
-        pthread_mutex_unlock(&printMutex);
+    leftWaiting--;
+    leftCrossing++;
+    batchCount++;
+    pthread_cleanup_pop(1); // libera mutex
 
-        sleep(SLEEP_TIME);
+    // pthread_mutex_unlock(&mutex);
 
-        sem_post(&multiplex);
+    pthread_mutex_lock(&printMutex);
+    printf("LEFT id %d -> RIGHT | batch: %d\n", id, batchCount);
+    printf("%s", drawLeft);
+    pthread_mutex_unlock(&printMutex);
 
-        pthread_mutex_lock(&lmutex);
-        leftCount--;
+    sleep(SLEEP_TIME);
 
-        if (leftCount == 0) {
-            printf("\tEsquerda terminou\n");
-            sem_post(&crossingLock);
+    pthread_mutex_lock(&mutex);
+
+    leftCrossing--;
+
+    if (leftCrossing == 0)
+    {
+        if (rightWaiting > 0 && (batchCount >= MIN_BATCH || leftWaiting == 0))
+        {
+            direction = RIGHT;
+            batchCount = 0;
+
+            pthread_mutex_lock(&printMutex);
+            printf("\tEsquerda terminou a rodada. Direita assume.\n");
+            pthread_mutex_unlock(&printMutex);
+
+            pthread_cond_broadcast(&canRight);
         }
+        else
+        {
+            pthread_cond_broadcast(&canLeft);
+        }
+    }
+    else
+    {
+        pthread_cond_broadcast(&canLeft);
+    }
 
-        pthread_mutex_unlock(&lmutex);
-
-        pthread_mutex_lock(&printMutex);
-        pthread_mutex_unlock(&printMutex);
+    pthread_mutex_unlock(&mutex);
 
     return NULL;
 }
 
 void *rightBaboon(void *arg)
 {
-        sem_wait(&catraca);
-        sem_post(&catraca);
+    int id = *(int *)arg;
 
-        pthread_mutex_lock(&rmutex);
-        rightCount++;
+    pthread_mutex_lock(&mutex);
+    // Para liberar o mutex caso a thread seja cancelada enquanto espera
+    pthread_cleanup_push(unlock_mutex, &mutex);
 
-        if (rightCount == 1)
-            sem_wait(&crossingLock);
+    rightWaiting++;
 
-        pthread_mutex_unlock(&rmutex);
+    while (
+        direction != RIGHT ||
+        leftCrossing > 0 ||
+        rightCrossing == MAX_ON_ROPE ||
+        (leftWaiting > 0 && batchCount >= MAX_BATCH)
+    )
+    {
+        pthread_cond_wait(&canRight, &mutex);
+    }
 
+    rightWaiting--;
+    rightCrossing++;
+    batchCount++;
 
-        sem_wait(&multiplex);
+    pthread_cleanup_pop(1); 
 
-        pthread_mutex_lock(&printMutex);
-        printf("RIGHT -> LEFT\n");
-        printf("%s", drawRight);
-        pthread_mutex_unlock(&printMutex);
+    pthread_mutex_unlock(&mutex);
 
-        sleep(SLEEP_TIME);
+    pthread_mutex_lock(&printMutex);
+    printf("RIGHT id %d -> LEFT | batch: %d\n", id, batchCount);
+    printf("%s", drawRight);
+    pthread_mutex_unlock(&printMutex);
 
-        sem_post(&multiplex);
+    sleep(SLEEP_TIME);
 
-        pthread_mutex_lock(&rmutex);
-        rightCount--;
+    pthread_mutex_lock(&mutex);
 
-        if (rightCount == 0) {
-            printf("\tDireita terminou\n");
-            sem_post(&crossingLock);
+    rightCrossing--;
+
+    if (rightCrossing == 0)
+    {
+        if (leftWaiting > 0 && (batchCount >= MIN_BATCH || rightWaiting == 0))
+        {
+            direction = LEFT;
+            batchCount = 0;
+
+            pthread_mutex_lock(&printMutex);
+            printf("\tDireita terminou a rodada. Esquerda assume.\n");
+            pthread_mutex_unlock(&printMutex);
+
+            pthread_cond_broadcast(&canLeft);
         }
+        else
+        {
+            pthread_cond_broadcast(&canRight);
+        }
+    }
+    else
+    {
+        pthread_cond_broadcast(&canRight);
+    }
 
-        pthread_mutex_unlock(&rmutex);
-
-        pthread_mutex_lock(&printMutex);
-        pthread_mutex_unlock(&printMutex);
+    pthread_mutex_unlock(&mutex);
 
     return NULL;
 }
-
-
 int main()
 {
     pthread_t left[NUM_LEFT_BABOONS];
     pthread_t right[NUM_RIGHT_BABOONS];
 
+    pthread_cond_init(&cond, NULL);
+
+    int leftIds[NUM_LEFT_BABOONS];
+    int rightIds[NUM_RIGHT_BABOONS];
+
     int createdLeft = 0;
     int createdRight = 0;
 
-    sem_init(&crossingLock, 0, 1);
-    sem_init(&catraca, 0, 1);
-    sem_init(&multiplex, 0, MAX_ON_ROPE);
-
     srand(time(NULL));
+
+    for (int i = 0; i < NUM_LEFT_BABOONS; i++)
+    {
+        leftIds[i] = i + 1;
+    }
+
+    for (int i = 0; i < NUM_RIGHT_BABOONS; i++)
+    {
+        rightIds[i] = i + 1;
+    }
 
     while (createdLeft < NUM_LEFT_BABOONS || createdRight < NUM_RIGHT_BABOONS)
     {
@@ -131,17 +214,17 @@ int main()
 
         if (chooseLeft && createdLeft < NUM_LEFT_BABOONS)
         {
-            pthread_create(&left[createdLeft], NULL, leftBaboon, NULL);
+            pthread_create(&left[createdLeft], NULL, leftBaboon, &leftIds[createdLeft]);
             createdLeft++;
         }
         else if (createdRight < NUM_RIGHT_BABOONS)
         {
-            pthread_create(&right[createdRight], NULL, rightBaboon, NULL);
+            pthread_create(&right[createdRight], NULL, rightBaboon, &rightIds[createdRight]);
             createdRight++;
         }
         else if (createdLeft < NUM_LEFT_BABOONS)
         {
-            pthread_create(&left[createdLeft], NULL, leftBaboon, NULL);
+            pthread_create(&left[createdLeft], NULL, leftBaboon, &leftIds[createdLeft]);
             createdLeft++;
         }
 
@@ -158,9 +241,11 @@ int main()
         pthread_join(right[i], NULL);
     }
 
-    sem_destroy(&crossingLock);
-    sem_destroy(&multiplex);
-    sem_destroy(&catraca);
+    pthread_mutex_destroy(&mutex);
+    pthread_mutex_destroy(&printMutex);
+
+    pthread_cond_destroy(&canLeft);
+    pthread_cond_destroy(&canRight);
 
     return 0;
 }
