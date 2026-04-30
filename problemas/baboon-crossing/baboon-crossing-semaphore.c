@@ -11,7 +11,7 @@
 
 #define MAX_DELAY_US 500000 
 
-#define NUM_LEFT_BABOONS 5
+#define NUM_LEFT_BABOONS 15
 #define NUM_RIGHT_BABOONS 5
 
 // crossingLock -> exclusão entre direções
@@ -110,7 +110,6 @@ void *rightBaboon(void *arg)
     return NULL;
 }
 
-
 int main()
 {
     pthread_t left[NUM_LEFT_BABOONS];
@@ -123,8 +122,14 @@ int main()
     sem_init(&catraca, 0, 1);
     sem_init(&multiplex, 0, MAX_ON_ROPE);
 
+    struct timespec start, end;
+    double timeDiff;
+
     srand(time(NULL));
 
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    // Criação aleatória das threads para a chegada dos babuínos
     while (createdLeft < NUM_LEFT_BABOONS || createdRight < NUM_RIGHT_BABOONS)
     {
         int chooseLeft = rand() % 2;
@@ -158,9 +163,27 @@ int main()
         pthread_join(right[i], NULL);
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    timeDiff =
+        (end.tv_sec - start.tv_sec) +
+        (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+
     sem_destroy(&crossingLock);
     sem_destroy(&multiplex);
     sem_destroy(&catraca);
+
+    printf(
+        "Tempo total: %.10f segundos para \n%d babuínos na esquerda e \n%d babuínos na direita\n",
+        timeDiff,
+        NUM_LEFT_BABOONS,
+        NUM_RIGHT_BABOONS
+    );
+
+    printf(
+        "Tempo médio por babuíno: %.10f segundos\n\n",
+        timeDiff / (NUM_LEFT_BABOONS + NUM_RIGHT_BABOONS)
+    );
 
     return 0;
 }

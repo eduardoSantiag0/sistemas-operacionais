@@ -9,7 +9,6 @@
 #include <time.h>
 #include <errno.h>
 
-
 #define MAX_BATCH 7
 #define MIN_BATCH 5
 #define SLEEP_TIME 4
@@ -71,9 +70,9 @@ void *leftBaboon(void *arg)
         pthread_cond_wait(&canLeft, &mutex);
     }
 
-    leftWaiting--;
-    leftCrossing++;
-    batchCount++;
+    leftWaiting--; // Remove o babuíno da fila de espera
+    leftCrossing++; // Registra que entrou na corda
+    batchCount++; // Conta para o batch
     pthread_cleanup_pop(1); // libera mutex
 
     // pthread_mutex_unlock(&mutex);
@@ -91,7 +90,8 @@ void *leftBaboon(void *arg)
 
     if (leftCrossing == 0)
     {
-        if (rightWaiting > 0 && (batchCount >= MIN_BATCH || leftWaiting == 0))
+        if (rightWaiting > 0 && 
+            (batchCount >= MIN_BATCH || leftWaiting == 0))
         {
             direction = RIGHT;
             batchCount = 0;
@@ -183,12 +183,16 @@ void *rightBaboon(void *arg)
 
     return NULL;
 }
+
 int main()
 {
     pthread_t left[NUM_LEFT_BABOONS];
     pthread_t right[NUM_RIGHT_BABOONS];
 
     pthread_cond_init(&cond, NULL);
+
+    struct timespec start, end;
+    double timeDiff;
 
     int leftIds[NUM_LEFT_BABOONS];
     int rightIds[NUM_RIGHT_BABOONS];
@@ -207,6 +211,8 @@ int main()
     {
         rightIds[i] = i + 1;
     }
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
 
     while (createdLeft < NUM_LEFT_BABOONS || createdRight < NUM_RIGHT_BABOONS)
     {
@@ -240,6 +246,24 @@ int main()
     {
         pthread_join(right[i], NULL);
     }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    timeDiff =
+        (end.tv_sec - start.tv_sec) +
+        (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+
+    printf(
+        "Tempo total: %.10f segundos para\n%d babuínos na esquerda e\n%d babuínos na direita\n",
+        timeDiff,
+        NUM_LEFT_BABOONS,
+        NUM_RIGHT_BABOONS
+    );
+
+    printf(
+        "Tempo médio por babuíno: %.10f segundos\n\n",
+        timeDiff / (NUM_LEFT_BABOONS + NUM_RIGHT_BABOONS)
+    );
 
     pthread_mutex_destroy(&mutex);
     pthread_mutex_destroy(&printMutex);

@@ -5,8 +5,8 @@
 #include <semaphore.h>
 #include <time.h>
 
-#define NUM_LEFT_BABOONS 10
-#define NUM_RIGHT_BABOONS 10
+#define NUM_LEFT_BABOONS 15
+#define NUM_RIGHT_BABOONS 5
 
 #define SLEEP_TIME 3
 #define MAX_ON_ROPE 5
@@ -43,13 +43,6 @@ void *leftBaboon(void *arg)
         || (rightWaiting > 0 && leftCrossing > 0)
     ) 
     {
-        printf("[ESPERANDO] Esquerda | fila E=%d D=%d | corda E=%d D=%d | direção atual=%s\n",
-            leftWaiting,
-            rightWaiting,
-            leftCrossing,
-            rightCrossing,
-            direction == LEFT ? "ESQUERDA" : "DIREITA"
-        );
 
         pthread_cond_wait(&canLeft, &mutex);
     }
@@ -57,16 +50,8 @@ void *leftBaboon(void *arg)
     leftWaiting--;
     leftCrossing++;
 
-    printf("[ENTROU]    Esquerda | fila E=%d D=%d | corda E=%d D=%d\n",
-        leftWaiting,
-        rightWaiting,
-        leftCrossing,
-        rightCrossing
-    );
-
     pthread_mutex_unlock(&mutex);
 
-    printf("[TRAVESSIA] Esquerda atravessando -> direita\n");
     printf("%s", drawLeft);
     sleep(SLEEP_TIME);
 
@@ -74,18 +59,12 @@ void *leftBaboon(void *arg)
 
     leftCrossing--;
 
-    printf("[SAIU]      Esquerda | fila E=%d D=%d | corda E=%d D=%d\n",
-        leftWaiting,
-        rightWaiting,
-        leftCrossing,
-        rightCrossing
-    );
 
     if (leftCrossing == 0 && rightWaiting > 0)
     {
         direction = RIGHT;
 
-        printf("[TROCA]     Rodada da esquerda terminou. Direita assume agora.\n");
+        printf("Rodada da esquerda terminou. Direita assume agora.\n");
 
         pthread_cond_broadcast(&canRight);
     }
@@ -111,30 +90,15 @@ void *rightBaboon(void *arg)
         || (leftWaiting > 0 && rightCrossing > 0)
     )
     {
-        printf("[ESPERANDO] Direita  | fila E=%d D=%d | corda E=%d D=%d | direção atual=%s\n",
-            leftWaiting,
-            rightWaiting,
-            leftCrossing,
-            rightCrossing,
-            direction == LEFT ? "ESQUERDA" : "DIREITA"
-        );
-
         pthread_cond_wait(&canRight, &mutex);
     }
 
     rightWaiting--;
     rightCrossing++;
 
-    printf("[ENTROU]    Direita  | fila E=%d D=%d | corda E=%d D=%d\n",
-        leftWaiting,
-        rightWaiting,
-        leftCrossing,
-        rightCrossing
-    );
 
     pthread_mutex_unlock(&mutex);
 
-    printf("[TRAVESSIA] Direita atravessando -> esquerda\n");
     printf("%s", drawRight);
     sleep(SLEEP_TIME);
 
@@ -142,18 +106,11 @@ void *rightBaboon(void *arg)
 
     rightCrossing--;
 
-    printf("[SAIU]      Direita  | fila E=%d D=%d | corda E=%d D=%d\n",
-        leftWaiting,
-        rightWaiting,
-        leftCrossing,
-        rightCrossing
-    );
-
     if (rightCrossing == 0 && leftWaiting > 0)
     {
         direction = LEFT;
 
-        printf("[TROCA]     Rodada da direita terminou. Esquerda assume agora.\n");
+        printf("Rodada da direita terminou. Esquerda assume agora.\n");
 
         pthread_cond_broadcast(&canLeft);
     }
@@ -177,6 +134,12 @@ int main()
 
     srand(time(NULL));
 
+    struct timespec start, end;
+    double timeDiff;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    // Criação aleatória das threads para a chegada dos babuínos
     while (createdLeft < NUM_LEFT_BABOONS || createdRight < NUM_RIGHT_BABOONS)
     {
         int chooseLeft = rand() % 2;
@@ -210,14 +173,30 @@ int main()
         pthread_join(right[i], NULL);
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    timeDiff =
+        (end.tv_sec - start.tv_sec) +
+        (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+
+    printf(
+        "Tempo total: %.10f segundos para \n%d babuínos na esquerda e \n%d babuínos na direita\n",
+        timeDiff,
+        NUM_LEFT_BABOONS,
+        NUM_RIGHT_BABOONS
+    );
+
+    printf(
+        "Tempo médio por babuíno: %.10f segundos\n\n",
+        timeDiff / (NUM_LEFT_BABOONS + NUM_RIGHT_BABOONS)
+    );
+
     pthread_mutex_destroy(&mutex);
     pthread_cond_destroy(&canLeft);
     pthread_cond_destroy(&canRight);
 
     return 0;
 }
-
-
 
 char *drawRight =
 "                                                                                \n"
